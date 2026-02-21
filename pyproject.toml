@@ -1,0 +1,23 @@
+[project]
+name = "llm-classifier"
+version = "0.1.0"
+description = "LLM-based classification, clustering and prediction framework with structured outputs"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+keywords = ["llm", "classification", "clustering", "pydantic", "machine-learning", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "instructor>=1.0",
+    "pydantic>=2.0",
+]

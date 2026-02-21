@@ -1,14 +1,15 @@
 # llm-classifier
 
-Structured classification and extraction on top of [Instructor](https://github.com/jxnl/instructor), with typed outputs via Pydantic.
+Structured LLM based classification, clustering and extraction framework that works with all major API providers ([see full list](https://python.useinstructor.com/)).
 
 ## Why use it
 
 - Return validated Pydantic models instead of free-form text
-- Add few-shot examples directly in each call
-- Optionally collect `reasoning` and `confidence`
+- Add few-shot examples directly in each call (prebuilt prompts - can be customized/replaced with your own)
+- Optionally collect `reasoning` and `confidence` to enhance results
 - Reduce variance with consensus voting
-- Run batched predictions with per-item error capture
+- Run batched predictions with intermediate caches and per-item error capture
+- Mutithreading support to speed up large batches
 
 ## Installation
 
@@ -24,11 +25,12 @@ from pydantic import BaseModel
 from llm_classifier import LLMClassifier
 
 
+## Can put in any fields you want as long as it is supported by the model's structured output capabilities. Here we just want a simple label.
 class Sentiment(BaseModel):
     label: Literal["positive", "negative", "neutral"]
 
 
-clf = LLMClassifier(model="openai/gpt-4o")
+clf = LLMClassifier(model="openai/gpt-4.1-nano")
 
 result = clf.predict(
     input="This movie was amazing!",
@@ -50,10 +52,10 @@ print(result.confidence)    # Optional[float]
 
 ```mermaid
 flowchart LR
-    A[Input text] --> B[Build prompts\n+schema + examples]
-    B --> C[LLM call via Instructor]
-    C --> D[Structured response\n+Pydantic-validated]
-    D --> E[Unwrap into PredictResult]
+    A[Input text] --> B[Build prompts<br/>+ schema + examples]
+    B --> C[LLM call]
+    C --> D[Structured response<br/>+ Pydantic-validated]
+    D --> E[Final Result object]
     E --> F[value]
     E --> G[reasoning optional]
     E --> H[confidence optional]
@@ -61,7 +63,7 @@ flowchart LR
 
 ## Core API
 
-### Single prediction
+### Single prediction with Consensus features
 
 ```python
 result = clf.predict(
@@ -77,7 +79,7 @@ print(result.compliant_variants)     # Variants matching selected output
 print(result.noncompliant_variants)  # Variants not matching selected output
 ```
 
-### Batch prediction
+### Batch prediction (Mutiple rows of data)
 
 ```python
 batch = clf.batch_predict(
@@ -103,9 +105,11 @@ When `cache_dir` is set, each processed index is appended to a cache log so reru
 
 Each `.jsonl` line is one step record keyed by a SHA-256 hash of the full input configuration (model, text, schema, examples, prompts, settings). On rerun with the same `cache_dir` + `cache_key`, already-cached inputs are skipped.
 
+*Note: It is your responsibility to track token usage and API costs, this package is simply a framework to make repetetive tasks easier and more robust.*
+
 ## Clustering with LLMCluster
 
-For bulk clustering of many items in a **single LLM call**, use `LLMCluster`. This is ideal when you have many rows (e.g., 100 survey responses) and want to group them into high-level clusters without making N separate calls.
+For bulk clustering of many items in a **single LLM call**, use `LLMCluster`. This is ideal when you have many rows (e.g., 100 survey responses) and want to group them into high-level clusters without making N separate calls. This approach is recommended for one time analyses for large datasets, where you can enable a strong reasoning model (eg: `gpt-5`) to get a result with one attempt - it will likely be less reliable than LLMClassifier / row by row approach but faster and potentially cheaper (Depending on the models you compare with).
 
 ### Basic usage
 
@@ -119,7 +123,7 @@ class ClusterSchema(BaseModel):
     summary: str
 
 
-clusterer = LLMCluster(model="openai/gpt-4o")
+clusterer = LLMCluster(model="openai/gpt-4.1")
 
 surveys = [
     "The product quality is excellent!",
@@ -148,16 +152,17 @@ for cluster in result.clusters:
 
 ```mermaid
 flowchart LR
-    A[N input items] --> B[Auto-assign IDs\n1...N]
+    A[N input items] --> B[Auto-assign fake IDs for the LLM<br/>1...N]
     B --> C[Single LLM call]
     C --> D[Structured clusters\nwith item_ids]
-    D --> E[Post-hoc validation]
+    D --> E[Post-hoc customizable validation]
     E -->|Pass| F[ClusterResult]
-    E -->|Fail| G[Retry with feedback]
-    G --> C
+    F -->H[List of Cluster]
+    F -->I[Validation retries used]
+    F -->J[Original LLM response for debugging]
+    H -->|Each cluster| K[Cluster fields as per schema + reference_ids]
+    E -->|Fail, Retry with feedback| C
 ```
-
-Items are assigned numeric IDs `[1]` through `[N]`, and the LLM returns clusters referencing these IDs. Validation ensures referential integrity before returning results.
 
 ### Cluster schema
 
@@ -204,6 +209,9 @@ result = clusterer.cluster(inputs=list(enumerate(surveys, 1)), cluster_schema=Cl
 
 # Suggest 3 clusters
 result = clusterer.cluster(inputs=list(enumerate(surveys, 1)), cluster_schema=ClusterSchema, n_clusters=3)
+
+# Free text
+result = clusterer.cluster(inputs=list(enumerate(surveys, 1)), cluster_schema=ClusterSchema, n_clusters="3-5")
 ```
 
 ### Error handling
@@ -223,64 +231,13 @@ except ClusterValidationError as e:
 
 Runnable scripts are in the [`examples/`](./examples) folder. Each includes inline data so you only need an API key to run them.
 
-### Example 1 — Sentiment analysis with few-shot learning ([`examples/01_sentiment_analysis.py`](./examples/01_sentiment_analysis.py))
+## Key Note
 
-12 Amazon-style product reviews → `positive / negative / neutral` using `batch_predict` with 3 few-shot examples, `reasoning=True`, and `confidence=True`.
+The package is built on the exceptional ability of Large Language Models (LLMs) to understand text, context, and perform zero-shot tasks. The underlying models handle the heavy lifting of interpreting input and generating output, while this package provides a structured framework to interact with them in a more robust and reliable way.
 
-| # | Review snippet | Predicted | Actual | Conf |
-|---|---------------|-----------|--------|------|
-| 1 | "Absolutely love this product! Works exactly…" | positive | positive | 0.99 |
-| 2 | "Completely useless. Broke after two days…" | negative | negative | 0.99 |
-| 3 | "It's okay. Does what it says but nothing special…" | neutral | neutral | 0.90 |
-| 4 | "Best purchase I've made this year…" | positive | positive | 0.99 |
-| 5 | "Very disappointed. The colour looked nothing…" | negative | negative | 0.97 |
-| 6 | "Works fine for what I need. Not amazing, not terrible." | neutral | neutral | 0.88 |
-| … | … | … | … | … |
+As a result, the package inherits the same limitations as the underlying models. If the model struggles to understand a task, or if the input is ambiguous or overly complex, errors or unexpected results may occur. Always validate outputs and consider the model’s capabilities when designing your workflows.
 
-**Result: 12/12 correct (100% accuracy)**
-
----
-
-### Example 2 — News topic classification with consensus voting ([`examples/02_news_classification.py`](./examples/02_news_classification.py))
-
-16 news headlines → `world / sports / business / technology` using zero-shot `batch_predict` with `consensus=5` (parallel). The 5-vote split shows the model's internal certainty.
-
-| # | Headline snippet | Predicted | Actual | Conf | Vote split |
-|---|-----------------|-----------|--------|------|------------|
-| 1 | "UN Security Council convenes emergency session…" | world | world | 0.97 | 5✓ 0✗ |
-| 5 | "Record-breaking sprinter smashes 100m world record…" | sports | sports | 0.99 | 5✓ 0✗ |
-| 9 | "Central bank raises interest rates for the third…" | business | business | 0.97 | 5✓ 0✗ |
-| 13 | "OpenAI announces next-generation model…" | technology | technology | 0.99 | 5✓ 0✗ |
-| … | … | … | … | … | … |
-
-**Result: 16/16 correct (100% accuracy), all votes unanimous**
-
----
-
-### Example 3 — Survey response clustering ([`examples/03_survey_clustering.py`](./examples/03_survey_clustering.py))
-
-20 open-ended NPS feedback responses for a SaaS product → 5 named clusters in a **single LLM call** using `LLMCluster`. Each cluster includes a generated name, summary, and sentiment.
-
-| Cluster | Sentiment | # Responses | Theme |
-|---------|-----------|-------------|-------|
-| Onboarding and Setup | positive | 2 | Easy setup wizard, fast first run |
-| Collaboration and Integrations | positive | 4 | Real-time teamwork, Slack/GitHub/Jira |
-| Performance and Reliability Issues | negative | 5 | Dashboard slowness, freezes, mobile crashes |
-| Pricing Concerns | negative | 2 | Free tier limits, unexpected price hike |
-| Feature Requests | mixed | 7 | Reporting, Gantt charts, search, notifications |
-
-**Result: all 20 responses assigned, 0 validation retries needed**
-
----
-
-## Behavior notes
-
-- `consensus` must be `>= 1`, else `ValueError`
-- `max_parallel` must be `>= 1`, else `ValueError`
-- `batch_predict(inputs=[])` raises `ValueError`
-- If both prompts resolve to empty, prediction raises `ValueError`
-- Consensus tie-break is deterministic: first-seen variant wins
-- `cache_key` requires `cache_dir`, otherwise a `ValueError` is raised
+Note that Large Language Models typically exhibit output variance, even with parameters such as `temperature=0`. Results are not guaranteed to be identical across runs. While features like `consensus`, `examples`, and `custom prompts` can help steer behavior toward more deterministic outcomes, LLMs are inherently non-deterministic systems. Keep this in mind when relying on generated outputs.
 
 ## Model support
 

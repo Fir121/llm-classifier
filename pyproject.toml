@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llm-classifier"
-version = "0.1.1"
+version = "0.1.2"
 description = "Structured LLM based classification, clustering and extraction framework that works with all major API providers"
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -8,19 +8,17 @@ on:
       - pyproject.toml
 
 jobs:
-  publish:
-    name: Build and Publish
+  check:
+    name: Check version
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/llm-classifier
-    permissions:
-      contents: write  # to create git tags
-      id-token: write  # for Trusted Publishing (OIDC)
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      exists: ${{ steps.tag_check.outputs.exists }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # needed to check existing tags
+          fetch-depth: 0
 
       - name: Extract version from pyproject.toml
         id: version
@@ -40,25 +38,35 @@ jobs:
             echo "New version ${{ steps.version.outputs.version }} detected, publishing..."
           fi
 
+  publish:
+    name: Build and Publish
+    needs: check
+    if: needs.check.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/llm-classifier
+    permissions:
+      contents: write  # to create git tags
+      id-token: write  # for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Create and push tag
-        if: steps.tag_check.outputs.exists == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag ${{ steps.version.outputs.tag }}
-          git push origin ${{ steps.version.outputs.tag }}
+          git tag ${{ needs.check.outputs.tag }}
+          git push origin ${{ needs.check.outputs.tag }}
 
       - uses: actions/setup-python@v5
-        if: steps.tag_check.outputs.exists == 'false'
         with:
           python-version: "3.11"
 
       - name: Build package
-        if: steps.tag_check.outputs.exists == 'false'
         run: |
           pip install build
           python -m build
 
       - name: Publish to PyPI
-        if: steps.tag_check.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,5 +1,7 @@
 """Core LLMCluster implementation."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
 from typing import Any, Generic, Type, TypeVar

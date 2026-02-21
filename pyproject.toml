@@ -1,10 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "llm-classifier"
 version = "0.1.0"
 description = "LLM-based classification, clustering and prediction framework with structured outputs"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
+authors = [{ name = "Fir121", email = "" }]
 keywords = ["llm", "classification", "clustering", "pydantic", "machine-learning", "ai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -16,8 +21,17 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "instructor>=1.0",
     "pydantic>=2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Fir121/llm-classifier"
+Repository = "https://github.com/Fir121/llm-classifier"
+Issues = "https://github.com/Fir121/llm-classifier/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llm_classifier"]

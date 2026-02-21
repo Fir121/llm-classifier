@@ -1,4 +1,4 @@
-"""LLMCluster implementation for single-call bulk clustering."""
+"""Core LLMCluster implementation."""
 
 import json
 from dataclasses import dataclass

@@ -713,6 +713,14 @@ class LLMClassifier:
             raise ValueError("max_parallel must be >= 1")
         if cache_key is not None and cache_dir is None:
             raise ValueError("cache_key requires cache_dir")
+        
+        # Give a warning if cache information is not provided
+        if (cache_dir is None) and (cache_key is None):
+            print(
+                "Warning: No cache_dir or cache_key provided. Batch caching is disabled, and can cause issue "
+                "in case execution is interrupted or if you want to reuse results later. To enable caching, "
+                "set cache_dir and optionally cache_key."
+            )
 
         results: list[PredictResult[T] | None] = [None] * len(inputs)
         errors_map: dict[int, Exception] = {}

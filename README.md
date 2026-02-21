@@ -98,12 +98,10 @@ print(batch.errors)     # [(index, Exception), ...]
 
 When `cache_dir` is set, each processed index is appended to a cache log so reruns skip already successful items.
 
-- Metadata file: `<cache_dir>/<cache_key>.meta.json`
-- Step log file: `<cache_dir>/<cache_key>.jsonl`
-- If `cache_key` is omitted: `batch_<signature16>` is generated automatically
+- Cache file: `<cache_dir>/<cache_key>.jsonl` (defaults to `input_cache.jsonl` when `cache_key` is omitted)
+- `cache_key` requires `cache_dir` to also be set, otherwise a `ValueError` is raised
 
-Each `.jsonl` line is one step record (`success` or `error`) with index and payload.
-On rerun with the same `cache_dir` + `cache_key`, successful indices are loaded from cache and not reprocessed.
+Each `.jsonl` line is one step record keyed by a SHA-256 hash of the full input configuration (model, text, schema, examples, prompts, settings). On rerun with the same `cache_dir` + `cache_key`, already-cached inputs are skipped.
 
 ## Clustering with LLMCluster
 
@@ -132,20 +130,18 @@ surveys = [
     "Support team was unhelpful",
 ]
 
+# cluster() requires (index, text) tuples — use enumerate to build them
+indexed_surveys = list(enumerate(surveys, 1))
+
 result = clusterer.cluster(
-    inputs=surveys,
+    inputs=indexed_surveys,
     cluster_schema=ClusterSchema,
-    reasoning=True,
-    confidence=True,
 )
 
 for cluster in result.clusters:
     print(f"\n{cluster.cluster.name}: {cluster.cluster.summary}")
-    for item in cluster.items:
-        print(f"  - {item}")
-
-print(f"\nReasoning: {result.reasoning}")
-print(f"Confidence: {result.confidence}")
+    for idx, text in cluster.references:
+        print(f"  [{idx}] {text}")
 ```
 
 ### How it works
@@ -165,7 +161,7 @@ Items are assigned numeric IDs `[1]` through `[N]`, and the LLM returns clusters
 
 ### Cluster schema
 
-Define a Pydantic model for per-cluster fields. An `item_ids` field is automatically injected:
+Define a Pydantic model for per-cluster fields. A `reference_ids: list[int]` field is automatically injected at runtime to track which items belong to each cluster — you do not need to add it yourself:
 
 ```python
 class TopicCluster(BaseModel):
@@ -187,7 +183,7 @@ The clusterer validates LLM responses and retries on failures:
 
 ```python
 result = clusterer.cluster(
-    inputs=surveys,
+    inputs=list(enumerate(surveys, 1)),
     cluster_schema=ClusterSchema,
     allow_overlap=False,     # Each item in exactly one cluster
     require_all=True,        # Every item must be assigned
@@ -204,10 +200,10 @@ Let the LLM decide the number of clusters, or provide a hint:
 
 ```python
 # LLM decides
-result = clusterer.cluster(inputs=surveys, cluster_schema=ClusterSchema)
+result = clusterer.cluster(inputs=list(enumerate(surveys, 1)), cluster_schema=ClusterSchema)
 
 # Suggest 3 clusters
-result = clusterer.cluster(inputs=surveys, cluster_schema=ClusterSchema, n_clusters=3)
+result = clusterer.cluster(inputs=list(enumerate(surveys, 1)), cluster_schema=ClusterSchema, n_clusters=3)
 ```
 
 ### Error handling
@@ -216,12 +212,66 @@ result = clusterer.cluster(inputs=surveys, cluster_schema=ClusterSchema, n_clust
 from llm_classifier import ClusterValidationError, ContextLengthError
 
 try:
-    result = clusterer.cluster(inputs=huge_list, cluster_schema=ClusterSchema)
+    result = clusterer.cluster(inputs=list(enumerate(huge_list, 1)), cluster_schema=ClusterSchema)
 except ContextLengthError as e:
     print(f"Too many items for model context: {e}")
 except ClusterValidationError as e:
     print(f"Validation failed after retries: {e.errors}")
 ```
+
+## Real-world examples
+
+Runnable scripts are in the [`examples/`](./examples) folder. Each includes inline data so you only need an API key to run them.
+
+### Example 1 — Sentiment analysis with few-shot learning ([`examples/01_sentiment_analysis.py`](./examples/01_sentiment_analysis.py))
+
+12 Amazon-style product reviews → `positive / negative / neutral` using `batch_predict` with 3 few-shot examples, `reasoning=True`, and `confidence=True`.
+
+| # | Review snippet | Predicted | Actual | Conf |
+|---|---------------|-----------|--------|------|
+| 1 | "Absolutely love this product! Works exactly…" | positive | positive | 0.99 |
+| 2 | "Completely useless. Broke after two days…" | negative | negative | 0.99 |
+| 3 | "It's okay. Does what it says but nothing special…" | neutral | neutral | 0.90 |
+| 4 | "Best purchase I've made this year…" | positive | positive | 0.99 |
+| 5 | "Very disappointed. The colour looked nothing…" | negative | negative | 0.97 |
+| 6 | "Works fine for what I need. Not amazing, not terrible." | neutral | neutral | 0.88 |
+| … | … | … | … | … |
+
+**Result: 12/12 correct (100% accuracy)**
+
+---
+
+### Example 2 — News topic classification with consensus voting ([`examples/02_news_classification.py`](./examples/02_news_classification.py))
+
+16 news headlines → `world / sports / business / technology` using zero-shot `batch_predict` with `consensus=5` (parallel). The 5-vote split shows the model's internal certainty.
+
+| # | Headline snippet | Predicted | Actual | Conf | Vote split |
+|---|-----------------|-----------|--------|------|------------|
+| 1 | "UN Security Council convenes emergency session…" | world | world | 0.97 | 5✓ 0✗ |
+| 5 | "Record-breaking sprinter smashes 100m world record…" | sports | sports | 0.99 | 5✓ 0✗ |
+| 9 | "Central bank raises interest rates for the third…" | business | business | 0.97 | 5✓ 0✗ |
+| 13 | "OpenAI announces next-generation model…" | technology | technology | 0.99 | 5✓ 0✗ |
+| … | … | … | … | … | … |
+
+**Result: 16/16 correct (100% accuracy), all votes unanimous**
+
+---
+
+### Example 3 — Survey response clustering ([`examples/03_survey_clustering.py`](./examples/03_survey_clustering.py))
+
+20 open-ended NPS feedback responses for a SaaS product → 5 named clusters in a **single LLM call** using `LLMCluster`. Each cluster includes a generated name, summary, and sentiment.
+
+| Cluster | Sentiment | # Responses | Theme |
+|---------|-----------|-------------|-------|
+| Onboarding and Setup | positive | 2 | Easy setup wizard, fast first run |
+| Collaboration and Integrations | positive | 4 | Real-time teamwork, Slack/GitHub/Jira |
+| Performance and Reliability Issues | negative | 5 | Dashboard slowness, freezes, mobile crashes |
+| Pricing Concerns | negative | 2 | Free tier limits, unexpected price hike |
+| Feature Requests | mixed | 7 | Reporting, Gantt charts, search, notifications |
+
+**Result: all 20 responses assigned, 0 validation retries needed**
+
+---
 
 ## Behavior notes
 
@@ -230,8 +280,7 @@ except ClusterValidationError as e:
 - `batch_predict(inputs=[])` raises `ValueError`
 - If both prompts resolve to empty, prediction raises `ValueError`
 - Consensus tie-break is deterministic: first-seen variant wins
-- `cache_key` requires `cache_dir`
-- Reusing a `cache_key` with different batch configuration raises `ValueError`
+- `cache_key` requires `cache_dir`, otherwise a `ValueError` is raised
 
 ## Model support
 

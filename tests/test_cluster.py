@@ -207,6 +207,27 @@ class TestPromptBuilding:
         )
         assert "Every reference ID must be assigned" in system
 
+    def test_build_prompt_allows_literal_braces(self, mock_clusterer):
+        """Prompt templates with literal braces should not raise formatting errors."""
+        inputs = [(1, "Item {A}"), (2, "Item B")]
+        response_schema = mock_clusterer._build_cluster_schema(SimpleCluster, n_items=2)
+        system, user = mock_clusterer._build_prompt(
+            inputs,
+            response_schema,
+            n_clusters=2,
+            allow_overlap=False,
+            require_all=True,
+            system_prompt=(
+                "Schema: {format}\n"
+                "Clustering: {n_clusters_instruction}\n"
+                "Rules: {validation_rules} | literal {rules}"
+            ),
+            user_prompt="Items:\n{items}\nliteral {notes}",
+        )
+        assert "literal {rules}" in system
+        assert "literal {notes}" in user
+        assert "Item {A}" in user
+
 
 # ============================================================================
 # Validation Tests

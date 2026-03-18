@@ -9,6 +9,8 @@ from typing import Any, Generic, Type, TypeVar
 import instructor
 from pydantic import BaseModel, Field, create_model
 
+from .prompt_utils import safe_prompt_format
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -288,7 +290,8 @@ class LLMCluster:
         if not system_prompt:
             system = None
         else:
-            system = system_prompt.format(
+            system = safe_prompt_format(
+                system_prompt,
                 format=format_schema,
                 n_clusters_instruction=n_clusters_instruction,
                 validation_rules=validation_rules,
@@ -298,7 +301,7 @@ class LLMCluster:
         if not user_prompt:
             user = None
         else:
-            user = user_prompt.format(items=items_str)
+            user = safe_prompt_format(user_prompt, items=items_str)
 
         return system, user
 

@@ -159,6 +159,18 @@ class TestPromptBuilding:
         assert "Great!" in system
         assert "Examples" in system
 
+    def test_build_prompt_allows_literal_braces(self, mock_classifier):
+        """Prompt templates with literal braces should not raise formatting errors."""
+        system, user = mock_classifier._build_prompt(
+            "payload {with} braces",
+            Sentiment,
+            system_prompt="Schema: {format} | keep literal {json}",
+            user_prompt="Input: {input} | keep literal {meta}",
+        )
+        assert "keep literal {json}" in system
+        assert "keep literal {meta}" in user
+        assert "payload {with} braces" in user
+
 
 # ============================================================================
 # Result Types Tests

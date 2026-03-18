@@ -14,6 +14,8 @@ from typing import Any, Generic, Type, TypeVar
 import instructor
 from pydantic import BaseModel, Field, create_model
 
+from .prompt_utils import safe_prompt_format
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -299,7 +301,8 @@ class LLMClassifier:
         if not system_prompt:
             system = None
         else:
-            system = system_prompt.format(
+            system = safe_prompt_format(
+                system_prompt,
                 examples=examples_str,
                 format=format_schema,
                 input=input_text,
@@ -309,7 +312,8 @@ class LLMClassifier:
         if not user_prompt:
             user = None
         else:
-            user = user_prompt.format(
+            user = safe_prompt_format(
+                user_prompt,
                 examples=examples_str,
                 format=format_schema,
                 input=input_text,
